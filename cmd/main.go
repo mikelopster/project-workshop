@@ -47,7 +47,7 @@ func setupApp() *fiber.App {
 	app := fiber.New()
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello World")
+		return c.SendString("Hello World 2")
 	})
 
 	// Route to check database connection
