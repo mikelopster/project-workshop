@@ -15,6 +15,18 @@ import (
 // Database connection
 var db *sql.DB
 
+// Customer คือโมเดลข้อมูลลูกค้าธนาคาร
+type Customer struct {
+	ID           string    `json:"id"`
+	FirstName    string    `json:"first_name"`
+	LastName     string    `json:"last_name"`
+	IDCardNumber string    `json:"id_card_number"`
+	PhoneNumber  string    `json:"phone_number"`
+	Email        string    `json:"email"`
+	Address      string    `json:"address"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 // setupDatabase initializes the PostgreSQL connection
 func setupDatabase() (*sql.DB, error) {
 	// Connection parameters
@@ -42,6 +54,65 @@ func setupDatabase() (*sql.DB, error) {
 	return db, nil
 }
 
+// StaffAuthMiddleware ตรวจสอบว่า request มาจากพนักงานที่มีสิทธิ์หรือไม่
+func staffAuthMiddleware(c *fiber.Ctx) error {
+	// ในแอพจริงควรจะมีการตรวจสอบ JWT token และสิทธิ์ของพนักงาน
+	// ตอนนี้เป็นเพียงตัวอย่าง จึงให้ผ่านไปทุก request
+	return c.Next()
+}
+
+// getCustomerDetails จัดการคำขอดูรายละเอียดลูกค้าจากพนักงานธนาคาร
+func getCustomerDetails(c *fiber.Ctx) error {
+	customerID := c.Params("customerId")
+
+	// ในแอพจริงจะต้องดึงข้อมูลลูกค้าจากฐานข้อมูล
+	// ตอนนี้ใช้ mock data สำหรับการทดสอบ
+	customer, err := getCustomerByID(customerID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "เกิดข้อผิดพลาดในการดึงข้อมูลลูกค้า",
+		})
+	}
+
+	if customer == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "ไม่พบข้อมูลลูกค้า",
+		})
+	}
+
+	return c.JSON(customer)
+}
+
+// getCustomerByID เป็นฟังก์ชันช่วยในการดึงข้อมูลลูกค้าจาก ID
+func getCustomerByID(id string) (*Customer, error) {
+	// นี่เป็นแค่ข้อมูลตัวอย่างสำหรับการทดสอบ
+	// ในแอพจริงควรดึงข้อมูลจากฐานข้อมูล
+	if id == "12345" {
+		return &Customer{
+			ID:           "12345",
+			FirstName:    "สมชาย",
+			LastName:     "ใจดี",
+			IDCardNumber: "1234567890123",
+			PhoneNumber:  "0891234567",
+			Email:        "somchai@example.com",
+			Address:      "123 ถนนสุขุมวิท กรุงเทพฯ",
+			CreatedAt:    time.Now().Add(-24 * time.Hour),
+		}, nil
+	}
+	return nil, nil
+}
+
+// setupStaffRoutes กำหนด routes สำหรับส่วนของพนักงาน
+func setupStaffRoutes(app *fiber.App) {
+	staff := app.Group("/staff")
+
+	// ใส่ middleware สำหรับตรวจสอบสิทธิ์พนักงานในทุก route ในกลุ่ม
+	staff.Use(staffAuthMiddleware)
+
+	// Route สำหรับดูรายละเอียดลูกค้า
+	staff.Get("/customers/:customerId", getCustomerDetails)
+}
+
 // setupApp configures and returns a Fiber app instance
 func setupApp() *fiber.App {
 	app := fiber.New()
@@ -63,6 +134,9 @@ func setupApp() *fiber.App {
 
 		return c.SendString("Database connected successfully")
 	})
+
+	// ตั้งค่า routes สำหรับพนักงาน
+	setupStaffRoutes(app)
 
 	return app
 }
