@@ -1,8 +1,8 @@
-// add code hello world
 package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -22,7 +22,7 @@ func setupDatabase() (*sql.DB, error) {
 
 	// Initialize the database connection
 	var err error
-	db, err := sql.Open("postgres", connStr)
+	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, err
 	}
@@ -42,10 +42,17 @@ func setupDatabase() (*sql.DB, error) {
 	return db, nil
 }
 
+// UpdateContactRequest represents the request body for updating contact information
+type UpdateContactRequest struct {
+	Phone string `json:"phone"`
+	Email string `json:"email"`
+}
+
 // setupApp configures and returns a Fiber app instance
 func setupApp() *fiber.App {
 	app := fiber.New()
 
+	// Root route
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello World")
 	})
@@ -62,6 +69,38 @@ func setupApp() *fiber.App {
 		}
 
 		return c.SendString("Database connected successfully")
+	})
+
+	// Route to update customer contact information
+	app.Put("/customers/me/contact", func(c *fiber.Ctx) error {
+		// Mock token validation (replace with actual token validation logic)
+		token := c.Get("Authorization")
+		if token == "" {
+			return c.Status(401).SendString("Unauthorized: Token is required")
+		}
+
+		// Parse request body
+		var req UpdateContactRequest
+		if err := json.Unmarshal(c.Body(), &req); err != nil {
+			return c.Status(400).SendString("Invalid request body")
+		}
+
+		// Validate phone and email
+		if req.Phone == "" || req.Email == "" {
+			return c.Status(400).SendString("Phone and email are required")
+		}
+
+		// Update contact information in the database
+		query := "UPDATE customers SET phone = $1, email = $2 WHERE id = $3"
+		customerID := 1 // Mock customer ID (replace with actual logic to extract from token)
+		_, err := db.Exec(query, req.Phone, req.Email, customerID)
+		if err != nil {
+			return c.Status(500).SendString(fmt.Sprintf("Failed to update contact information: %v", err))
+		}
+
+		return c.Status(200).JSON(fiber.Map{
+			"message": "Contact information updated successfully",
+		})
 	})
 
 	return app
