@@ -1,4 +1,4 @@
-package main
+ppackage main
 
 import (
     "bytes"
@@ -296,3 +296,38 @@ func TestValidateToken(t *testing.T) {
     resp, _ = app.Test(req)
     assert.Equal(t, 401, resp.StatusCode)
 }
+
+func TestGetCustomerDetailsSuccess(t *testing.T) {
+    app := setupApp()
+    req := httptest.NewRequest("GET", "/staff/customers/12345", nil)
+    resp, err := app.Test(req)
+    assert.NoError(t, err)
+    assert.Equal(t, 200, resp.StatusCode)
+
+    body, err := io.ReadAll(resp.Body)
+    assert.NoError(t, err)
+
+    var customer map[string]interface{}
+    err = json.Unmarshal(body, &customer)
+    assert.NoError(t, err)
+    assert.Equal(t, "12345", customer["id"])
+    assert.Equal(t, "สมชาย", customer["first_name"])
+    assert.Equal(t, "ใจดี", customer["last_name"])
+}
+
+func TestGetCustomerDetailsNotFound(t *testing.T) {
+    app := setupApp()
+    req := httptest.NewRequest("GET", "/staff/customers/99999", nil)
+    resp, err := app.Test(req)
+    assert.NoError(t, err)
+    assert.Equal(t, 404, resp.StatusCode)
+
+    body, err := io.ReadAll(resp.Body)
+    assert.NoError(t, err)
+
+    var errorResponse map[string]interface{}
+    err = json.Unmarshal(body, &errorResponse)
+    assert.NoError(t, err)
+    assert.Contains(t, errorResponse, "error")
+}
+
