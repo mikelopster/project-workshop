@@ -64,6 +64,30 @@ func setupApp() *fiber.App {
 		return c.SendString("Database connected successfully")
 	})
 
+	app.Post("/transactions/transfer/internal", func(c *fiber.Ctx) error {
+		type TransferRequest struct {
+			FromAccountId string  `json:"fromAccountId"`
+			ToAccountId   string  `json:"toAccountId"`
+			Amount        float64 `json:"amount"`
+			Note          string  `json:"note"`
+		}
+
+		var request TransferRequest
+		if err := c.BodyParser(&request); err != nil {
+			return c.Status(400).SendString("Invalid request")
+		}
+
+		// Mock data
+		if request.FromAccountId != "ACC001" || request.ToAccountId != "ACC002" || request.Amount != 500 || request.Note != "Test transfer" {
+			return c.Status(400).SendString("Invalid transfer request")
+		}
+
+		// Simulate transfer logic
+		// ...
+
+		return c.SendString("Transfer successful")
+	})
+
 	return app
 }
 
