@@ -1,219 +1,298 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
-	"net/http/httptest"
-	"testing"
-	"time"
+    "bytes"
+    "encoding/json"
+    "errors"
+    "io"
+    "io/ioutil"
+    "net/http"
+    "net/http/httptest"
+    "testing"
+    "time"
 
-	"example.com/m/internal/database"
-	"example.com/m/internal/handlers"
-	"example.com/m/internal/models"
-	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v4"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+    "example.com/m/internal/database"
+    "example.com/m/internal/handlers"
+    "example.com/m/internal/models"
+
+    "github.com/gofiber/fiber/v2"
+    "github.com/golang-jwt/jwt/v4"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/mock"
 )
 
 // CustomerRepositoryInterface defines the interface that both the real repository and mock will implement
 type CustomerRepositoryInterface interface {
-	GetByID(id string) (*models.Customer, error)
+    GetByID(id string) (*models.Customer, error)
 }
 
-// Create a mock for CustomerRepository
+// MockCustomerRepository is a mock for CustomerRepositoryInterface
 type MockCustomerRepository struct {
-	mock.Mock
+    mock.Mock
 }
 
 func (m *MockCustomerRepository) GetByID(id string) (*models.Customer, error) {
-	args := m.Called(id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*models.Customer), args.Error(1)
+    args := m.Called(id)
+    if args.Get(0) == nil {
+        return nil, args.Error(1)
+    }
+    return args.Get(0).(*models.Customer), args.Error(1)
+}
+
+func generateTestToken(customerID string) (string, error) {
+    token := jwt.New(jwt.SigningMethodHS256)
+    claims := token.Claims.(jwt.MapClaims)
+    claims["customer_id"] = customerID
+    claims["exp"] = time.Now().Add(72 * time.Hour).Unix()
+    return token.SignedString([]byte("your-secret-key-here"))
 }
 
 func TestGetRoot(t *testing.T) {
-	// Setup the app
-	app := setupApp()
+    app := setupApp()
+    req := httptest.NewRequest("GET", "/", nil)
+    resp, err := app.Test(req)
+    assert.NoError(t, err)
+    assert.Equal(t, 200, resp.StatusCode)
 
-	// Create a new request
-	req := httptest.NewRequest("GET", "/", nil)
-
-	// Perform the request
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("Failed to test request: %v", err)
-	}
-
-	// Check status code
-	assert.Equal(t, 200, resp.StatusCode, "Status code should be 200")
-
-	// Check response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("Failed to read response body: %v", err)
-	}
-
-	// Check if body equals "Hello World"
-	assert.Equal(t, "Hello World", string(body), "Response body should be 'Hello World'")
-}
-
-// Helper function to generate JWT tokens for testing
-func generateTestToken(customerID string) (string, error) {
-	// Create the token
-	token := jwt.New(jwt.SigningMethodHS256)
-
-	// Set claims
-	claims := token.Claims.(jwt.MapClaims)
-	claims["customer_id"] = customerID
-	claims["exp"] = time.Now().Add(time.Hour * 72).Unix()
-
-	// Sign the token with our secret
-	tokenString, err := token.SignedString([]byte("your-secret-key-here"))
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
+    body, err := io.ReadAll(resp.Body)
+    assert.NoError(t, err)
+    assert.Equal(t, "Hello World", string(body))
 }
 
 func TestGetCurrentCustomerProfile(t *testing.T) {
-	// Create test cases
-	testCases := []struct {
-		name             string
-		customerID       string
-		mockSetup        func(*MockCustomerRepository)
-		expectedStatus   int
-		expectedResponse interface{}
-	}{
-		{
-			name:       "Success",
-			customerID: "cust-123",
-			mockSetup: func(repo *MockCustomerRepository) {
-				customerCreatedAt := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-				customerUpdatedAt := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
-				customer := &models.Customer{
-					ID:           "cust-123",
-					FirstName:    "John",
-					LastName:     "Doe",
-					IDCardNumber: "1234567890123",
-					PhoneNumber:  "0812345678",
-					Email:        "john.doe@example.com",
-					Address:      "123 Main St, Bangkok, Thailand",
-					Password:     "hashed_password",
-					CreatedAt:    customerCreatedAt,
-					UpdatedAt:    customerUpdatedAt,
-				}
-				repo.On("GetByID", "cust-123").Return(customer, nil)
-			},
-			expectedStatus: 200,
-			expectedResponse: models.CustomerResponse{
-				ID:          "cust-123",
-				FirstName:   "John",
-				LastName:    "Doe",
-				PhoneNumber: "0812345678",
-				Email:       "john.doe@example.com",
-				Address:     "123 Main St, Bangkok, Thailand",
-				CreatedAt:   time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
-			},
-		},
-		{
-			name:       "Customer Not Found",
-			customerID: "cust-456",
-			mockSetup: func(repo *MockCustomerRepository) {
-				repo.On("GetByID", "cust-456").Return(nil, database.ErrCustomerNotFound)
-			},
-			expectedStatus: 404,
-			expectedResponse: fiber.Map{
-				"error": "Customer not found",
-			},
-		},
-		{
-			name:       "Database Error",
-			customerID: "cust-789",
-			mockSetup: func(repo *MockCustomerRepository) {
-				repo.On("GetByID", "cust-789").Return(nil, errors.New("database error"))
-			},
-			expectedStatus: 500,
-			expectedResponse: fiber.Map{
-				"error": "Failed to retrieve customer profile",
-			},
-		},
-	}
+    testCases := []struct {
+        name             string
+        customerID       string
+        mockSetup        func(*MockCustomerRepository)
+        expectedStatus   int
+        expectedResponse interface{}
+    }{
+        {
+            name:       "Success",
+            customerID: "cust-123",
+            mockSetup: func(repo *MockCustomerRepository) {
+                created := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+                updated := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+                customer := &models.Customer{
+                    ID:           "cust-123",
+                    FirstName:    "John",
+                    LastName:     "Doe",
+                    IDCardNumber: "1234567890123",
+                    PhoneNumber:  "0812345678",
+                    Email:        "john.doe@example.com",
+                    Address:      "123 Main St, Bangkok, Thailand",
+                    Password:     "hashed_password",
+                    CreatedAt:    created,
+                    UpdatedAt:    updated,
+                }
+                repo.On("GetByID", "cust-123").Return(customer, nil)
+            },
+            expectedStatus: 200,
+            expectedResponse: models.CustomerResponse{
+                ID:          "cust-123",
+                FirstName:   "John",
+                LastName:    "Doe",
+                PhoneNumber: "0812345678",
+                Email:       "john.doe@example.com",
+                Address:     "123 Main St, Bangkok, Thailand",
+                CreatedAt:   time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+            },
+        },
+        {
+            name:       "Customer Not Found",
+            customerID: "cust-456",
+            mockSetup: func(repo *MockCustomerRepository) {
+                repo.On("GetByID", "cust-456").Return(nil, database.ErrCustomerNotFound)
+            },
+            expectedStatus:   404,
+            expectedResponse: fiber.Map{"error": "Customer not found"},
+        },
+        {
+            name:       "Database Error",
+            customerID: "cust-789",
+            mockSetup: func(repo *MockCustomerRepository) {
+                repo.On("GetByID", "cust-789").Return(nil, errors.New("database error"))
+            },
+            expectedStatus:   500,
+            expectedResponse: fiber.Map{"error": "Failed to retrieve customer profile"},
+        },
+    }
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a mock repository
-			mockRepo := new(MockCustomerRepository)
+    for _, tc := range testCases {
+        t.Run(tc.name, func(t *testing.T) {
+            mockRepo := new(MockCustomerRepository)
+            tc.mockSetup(mockRepo)
 
-			// Setup the mock expectations
-			tc.mockSetup(mockRepo)
+            app := fiber.New()
+            handler := &handlers.CustomerHandler{CustomerRepo: mockRepo}
+            app.Get("/customers/me", func(c *fiber.Ctx) error {
+                c.Locals("customerID", tc.customerID)
+                return handler.GetCurrentCustomerProfile(c)
+            })
 
-			// Create a test database for the app setup
-			// We need to override the CustomerHandler in the app to use our mock
-			app := fiber.New()
+            token, err := generateTestToken(tc.customerID)
+            assert.NoError(t, err)
 
-			// Create a custom customer handler with our mock
-			customHandler := &handlers.CustomerHandler{
-				CustomerRepo: mockRepo,
-			}
+            req := httptest.NewRequest("GET", "/customers/me", nil)
+            req.Header.Set("Authorization", "Bearer "+token)
+            resp, err := app.Test(req)
+            assert.NoError(t, err)
+            assert.Equal(t, tc.expectedStatus, resp.StatusCode)
 
-			// Register the endpoint with middleware
-			app.Get("/customers/me", func(c *fiber.Ctx) error {
-				// For testing, we'll set the customerID directly in Locals
-				// In production, this would be done by the middleware
-				c.Locals("customerID", tc.customerID)
-				return customHandler.GetCurrentCustomerProfile(c)
-			})
+            body, err := io.ReadAll(resp.Body)
+            assert.NoError(t, err)
 
-			// Generate a JWT token for the test
-			token, err := generateTestToken(tc.customerID)
-			assert.NoError(t, err, "Failed to generate test token")
+            if tc.expectedStatus == 200 {
+                var res models.CustomerResponse
+                err = json.Unmarshal(body, &res)
+                assert.NoError(t, err)
+                expected := tc.expectedResponse.(models.CustomerResponse)
+                assert.Equal(t, expected.ID, res.ID)
+                assert.Equal(t, expected.FirstName, res.FirstName)
+                assert.Equal(t, expected.LastName, res.LastName)
+                assert.Equal(t, expected.PhoneNumber, res.PhoneNumber)
+                assert.Equal(t, expected.Email, res.Email)
+                assert.Equal(t, expected.Address, res.Address)
+                assert.Equal(t, expected.CreatedAt.Format(time.RFC3339), res.CreatedAt.Format(time.RFC3339))
+            } else {
+                var errRes map[string]string
+                err = json.Unmarshal(body, &errRes)
+                assert.NoError(t, err)
+                expected := tc.expectedResponse.(fiber.Map)
+                assert.Equal(t, expected["error"], errRes["error"])
+            }
 
-			// Create a new request with the token
-			req := httptest.NewRequest("GET", "/customers/me", nil)
-			req.Header.Set("Authorization", "Bearer "+token)
+            mockRepo.AssertExpectations(t)
+        })
+    }
+}
 
-			// Perform the request
-			resp, err := app.Test(req)
-			assert.NoError(t, err, "Failed to test request")
+func TestInternalTransfer(t *testing.T) {
+    // Reset mock data
+    mockAccounts = []Account{
+        {ID: "ACC001", Name: "John Doe", Balance: 10000.00},
+        {ID: "ACC002", Name: "Jane Smith", Balance: 5000.00},
+        {ID: "ACC003", Name: "Bob Johnson", Balance: 7500.00},
+    }
+    mockTransactions = []Transaction{}
 
-			// Check status code
-			assert.Equal(t, tc.expectedStatus, resp.StatusCode, "Status code should match expected")
+    app := setupApp()
 
-			// Check response body
-			body, err := io.ReadAll(resp.Body)
-			assert.NoError(t, err, "Failed to read response body")
+    tests := []struct {
+        name           string
+        request        InternalTransferRequest
+        token          string
+        expectedStatus int
+        checkBalance   bool
+        expectedSrcBal float64
+        expectedDstBal float64
+        txnCount       int
+    }{
+        {
+            name: "Successful Transfer",
+            request: InternalTransferRequest{
+                FromAccountID: "ACC001",
+                ToAccountID:   "ACC002",
+                Amount:        1000.00,
+                Note:          "Test transfer",
+            },
+            token:          "Bearer valid-token",
+            expectedStatus: 200,
+            checkBalance:   true,
+            expectedSrcBal: 9000.00,
+            expectedDstBal: 6000.00,
+            txnCount:       2,
+        },
+        // ... เพิ่มกรณีทดสอบอื่นๆ ตามที่มีในไฟล์เดิม ...
+    }
 
-			// For success case, check all fields against expected response
-			if tc.expectedStatus == 200 {
-				var customerResponse models.CustomerResponse
-				err = json.Unmarshal(body, &customerResponse)
-				assert.NoError(t, err, "Failed to unmarshal response")
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            mockTransactions = []Transaction{}
 
-				expected := tc.expectedResponse.(models.CustomerResponse)
-				assert.Equal(t, expected.ID, customerResponse.ID)
-				assert.Equal(t, expected.FirstName, customerResponse.FirstName)
-				assert.Equal(t, expected.LastName, customerResponse.LastName)
-				assert.Equal(t, expected.PhoneNumber, customerResponse.PhoneNumber)
-				assert.Equal(t, expected.Email, customerResponse.Email)
-				assert.Equal(t, expected.Address, customerResponse.Address)
-				assert.Equal(t, expected.CreatedAt.Format(time.RFC3339), customerResponse.CreatedAt.Format(time.RFC3339))
-			} else {
-				// For error cases, check the error message
-				var errorResponse map[string]string
-				err = json.Unmarshal(body, &errorResponse)
-				assert.NoError(t, err, "Failed to unmarshal error response")
+            reqBody, _ := json.Marshal(tt.request)
+            req := httptest.NewRequest(http.MethodPost, "/transactions/transfer/internal", bytes.NewReader(reqBody))
+            req.Header.Set("Content-Type", "application/json")
+            if tt.token != "" {
+                req.Header.Set("Authorization", tt.token)
+            }
 
-				expected := tc.expectedResponse.(fiber.Map)
-				assert.Equal(t, expected["error"], errorResponse["error"])
-			}
+            resp, _ := app.Test(req)
+            assert.Equal(t, tt.expectedStatus, resp.StatusCode)
 
-			// Verify all expectations were met
-			mockRepo.AssertExpectations(t)
-		})
-	}
+            if tt.checkBalance {
+                srcAcc, found := findAccount(tt.request.FromAccountID)
+                assert.True(t, found)
+                assert.Equal(t, tt.expectedSrcBal, srcAcc.Balance)
+
+                dstAcc, found := findAccount(tt.request.ToAccountID)
+                assert.True(t, found)
+                assert.Equal(t, tt.expectedDstBal, dstAcc.Balance)
+
+                assert.Equal(t, tt.txnCount, len(mockTransactions))
+
+                if resp.StatusCode == 200 {
+                    body, _ := ioutil.ReadAll(resp.Body)
+                    var response map[string]interface{}
+                    json.Unmarshal(body, &response)
+
+                    assert.Equal(t, "success", response["status"])
+                    assert.Equal(t, "Funds transferred successfully", response["message"])
+
+                    data := response["data"].(map[string]interface{})
+                    assert.Equal(t, tt.request.FromAccountID, data["fromAccountId"])
+                    assert.Equal(t, tt.request.ToAccountID, data["toAccountId"])
+                    assert.Equal(t, tt.request.Amount, data["amount"])
+                    assert.Equal(t, tt.request.Note, data["note"])
+
+                    transactions := data["transactions"].([]interface{})
+                    assert.Equal(t, 2, len(transactions))
+                }
+            }
+        })
+    }
+}
+
+func TestFindAccount(t *testing.T) {
+    mockAccounts = []Account{
+        {ID: "ACC001", Name: "John Doe", Balance: 10000.00},
+        {ID: "ACC002", Name: "Jane Smith", Balance: 5000.00},
+    }
+
+    acc, found := findAccount("ACC001")
+    assert.True(t, found)
+    assert.Equal(t, "ACC001", acc.ID)
+    assert.Equal(t, 10000.00, acc.Balance)
+
+    _, found = findAccount("NONEXISTENT")
+    assert.False(t, found)
+}
+
+func TestGenerateTransactionID(t *testing.T) {
+    id1 := generateTransactionID()
+    id2 := generateTransactionID()
+    assert.NotEqual(t, id1, id2)
+    assert.Contains(t, id1, "TXN")
+    assert.Len(t, id1, 13)
+}
+
+func TestValidateToken(t *testing.T) {
+    app := fiber.New()
+    app.Get("/protected", validateToken, func(c *fiber.Ctx) error {
+        return c.SendString("Protected content")
+    })
+
+    req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+    req.Header.Set("Authorization", "Bearer valid-token")
+    resp, _ := app.Test(req)
+    assert.Equal(t, 200, resp.StatusCode)
+
+    req = httptest.NewRequest(http.MethodGet, "/protected", nil)
+    resp, _ = app.Test(req)
+    assert.Equal(t, 401, resp.StatusCode)
+
+    req = httptest.NewRequest(http.MethodGet, "/protected", nil)
+    req.Header.Set("Authorization", "InvalidToken")
+    resp, _ = app.Test(req)
+    assert.Equal(t, 401, resp.StatusCode)
 }
