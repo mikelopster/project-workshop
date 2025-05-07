@@ -69,9 +69,18 @@ func (h *LoanHandler) ApplyForPersonalLoan(c *fiber.Ctx) error {
 
 	// Create loan application record
 	now := time.Now()
+
+	// Parse the customer ID string into a UUID
+	customerUUID, err := uuid.Parse(customerID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid customer ID format",
+		})
+	}
+
 	application := &models.LoanApplication{
 		ID:              uuid.New(),
-		CustomerID:      customerID,
+		CustomerID:      customerUUID,
 		AmountRequested: request.AmountRequested,
 		Purpose:         request.Purpose,
 		IncomeDetails:   request.IncomeDetails,
