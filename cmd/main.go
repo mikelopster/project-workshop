@@ -23,27 +23,22 @@ var db *sql.DB
 
 // setupDatabase initializes the PostgreSQL connection
 func setupDatabase() (*sql.DB, error) {
-    // Connection parameters
     connStr := "postgresql://postgres:postgres@localhost:5432/workshop?sslmode=disable"
 
-    // Initialize the database connection
     var err error
     db, err = sql.Open("postgres", connStr)
     if err != nil {
         return nil, err
     }
 
-    // Test the connection
     if err = db.Ping(); err != nil {
         return nil, err
     }
 
-    // Set connection pool settings
     db.SetMaxOpenConns(25)
     db.SetMaxIdleConns(5)
     db.SetConnMaxLifetime(5 * time.Minute)
 
-    // Initialize database schema
     if err = database.InitDatabase(db); err != nil {
         return nil, fmt.Errorf("failed to initialize database schema: %w", err)
     }
@@ -93,26 +88,21 @@ func setupApp() *fiber.App {
 
     // Route to update customer contact information
     app.Put("/customers/me/contact", func(c *fiber.Ctx) error {
-        // Mock token validation (replace with actual token validation logic)
         token := c.Get("Authorization")
         if token == "" {
             return c.Status(401).SendString("Unauthorized: Token is required")
         }
 
-        // Parse request body
         var req UpdateContactRequest
         if err := json.Unmarshal(c.Body(), &req); err != nil {
             return c.Status(400).SendString("Invalid request body")
         }
-
-        // Validate phone and email
         if req.Phone == "" || req.Email == "" {
             return c.Status(400).SendString("Phone and email are required")
         }
 
-        // Update contact information in the database
         query := "UPDATE customers SET phone = $1, email = $2 WHERE id = $3"
-        customerID := 1 // Mock customer ID (replace with actual logic to extract from token)
+        customerID := 1 // replace with real ID from token
         if _, err := db.Exec(query, req.Phone, req.Email, customerID); err != nil {
             return c.Status(500).SendString(fmt.Sprintf("Failed to update contact information: %v", err))
         }
@@ -135,7 +125,6 @@ func setupApp() *fiber.App {
 }
 
 func main() {
-    // Initialize database connection
     var err error
     db, err = setupDatabase()
     if err != nil {
