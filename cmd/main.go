@@ -8,7 +8,13 @@ import (
 	"os"
 	"time"
 
+	"example.com/m/internal/database"
+	"example.com/m/internal/handlers"
+	"example.com/m/internal/middleware"
+	"example.com/m/internal/repository"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
@@ -38,14 +44,37 @@ func setupDatabase() (*sql.DB, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
+	// Initialize database schema
+	err = database.InitDatabase(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database schema: %w", err)
+	}
+
 	fmt.Println("Connected to PostgreSQL database!")
 	return db, nil
 }
 
 // setupApp configures and returns a Fiber app instance
 func setupApp() *fiber.App {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
 
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+
+			return c.Status(code).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
+	})
+
+	// Middleware
+	app.Use(logger.New())
+	app.Use(cors.New())
+
+	// Basic routes
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello World")
 	})
@@ -63,6 +92,19 @@ func setupApp() *fiber.App {
 
 		return c.SendString("Database connected successfully")
 	})
+
+	// Initialize repositories
+	loanRepo := repository.NewPostgresLoanRepository(db)
+
+	// Initialize handlers
+	loanHandler := handlers.NewLoanHandler(loanRepo)
+
+	// API routes
+	api := app.Group("/api/v1")
+
+	// Loan routes - requires authentication
+	loans := api.Group("/loans")
+	loans.Post("/personal/apply", middleware.JWTMiddleware(), loanHandler.ApplyForPersonalLoan)
 
 	return app
 }
