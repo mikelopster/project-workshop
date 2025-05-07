@@ -75,7 +75,6 @@ func setupApp() *fiber.App {
     app.Get("/", func(c *fiber.Ctx) error {
         return c.SendString("Hello World")
     })
-
     app.Get("/db-status", func(c *fiber.Ctx) error {
         if db == nil {
             return c.Status(500).SendString("Database not connected")
@@ -86,7 +85,9 @@ func setupApp() *fiber.App {
         return c.SendString("Database connected successfully")
     })
 
-    // Route to update customer contact information
+    // Customer routes
+    customerHandler := handlers.NewCustomerHandler(db)
+    app.Get("/customers/me", middleware.JWTMiddleware(), customerHandler.GetCurrentCustomerProfile)
     app.Put("/customers/me/contact", func(c *fiber.Ctx) error {
         token := c.Get("Authorization")
         if token == "" {
@@ -102,7 +103,7 @@ func setupApp() *fiber.App {
         }
 
         query := "UPDATE customers SET phone = $1, email = $2 WHERE id = $3"
-        customerID := 1 // replace with real ID from token
+        customerID := 1 // TODO: extract actual customer ID from token
         if _, err := db.Exec(query, req.Phone, req.Email, customerID); err != nil {
             return c.Status(500).SendString(fmt.Sprintf("Failed to update contact information: %v", err))
         }
@@ -112,11 +113,9 @@ func setupApp() *fiber.App {
         })
     })
 
-    // Initialize repositories and handlers for loan feature
+    // Loan feature
     loanRepo := repository.NewPostgresLoanRepository(db)
     loanHandler := handlers.NewLoanHandler(loanRepo)
-
-    // API group
     api := app.Group("/api/v1")
     loans := api.Group("/loans")
     loans.Post("/personal/apply", middleware.JWTMiddleware(), loanHandler.ApplyForPersonalLoan)

@@ -1,98 +1,105 @@
 package middleware
 
 import (
-	"errors"
-	"strings"
+    "errors"
+    "fmt"
+    "strings"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
+    "github.com/fiber/fiber/v2"
+    "github.com/golang-jwt/jwt/v4"
+    "github.com/google/uuid"
 )
 
-// JWTMiddleware handles authentication by JWT token
-// Note: This is a simplified version for the purpose of this example
-// In a real application, you'd use a proper JWT library to verify tokens
+// JWTSecret is the secret key used for signing JWT tokens.
+// In production, load this from environment variables.
+const JWTSecret = "your-secret-key-here"
+
+// JWTMiddleware validates the JWT token, extracts the customer ID claim,
+// and stores it in context locals.
 func JWTMiddleware() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Get authorization header
-		authHeader := c.Get("Authorization")
+    return func(c *fiber.Ctx) error {
+        authHeader := c.Get("Authorization")
+        if authHeader == "" {
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Authorization header is required",
+            })
+        }
 
-		// Check if authorization header exists and has the right format
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Missing or invalid Authorization header",
-			})
-		}
+        parts := strings.Split(authHeader, " ")
+        if len(parts) != 2 || parts[0] != "Bearer" {
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Authorization header format must be Bearer {token}",
+            })
+        }
 
-		// Extract token
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid token",
-			})
-		}
+        tokenString := parts[1]
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+            }
+            return []byte(JWTSecret), nil
+        })
+        if err != nil {
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Invalid token: " + err.Error(),
+            })
+        }
 
-		// Note: In a real application, you would validate the token here
-		// For this example, we'll just set a mock customer ID
-		// This would normally come from decoding and validating the JWT token
+        if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+            customerID, ok := claims["customer_id"].(string)
+            if !ok {
+                return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                    "error": "Invalid token: missing customer_id claim",
+                })
+            }
+            c.Locals("customerID", customerID)
+            return c.Next()
+        }
 
-		// Mock customer ID for development purposes only
-		customerID, err := uuid.Parse("00000000-0000-0000-0000-000000000001")
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to parse customer ID",
-			})
-		}
-
-		// Set customer ID in context for handlers to use
-		c.Locals("customerID", customerID)
-
-		return c.Next()
-	}
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+            "error": "Invalid token",
+        })
+    }
 }
 
-// StaffAuthMiddleware validates that the request is coming from bank staff
-// Note: This is a simplified version for demo purposes
+// StaffAuthMiddleware validates that the request is coming from bank staff.
+// Sets staffID and isStaff flag in context locals.
 func StaffAuthMiddleware() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Get authorization header
-		authHeader := c.Get("Authorization")
+    return func(c *fiber.Ctx) error {
+        authHeader := c.Get("Authorization")
+        if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Missing or invalid Authorization header",
+            })
+        }
 
-		// Check if authorization header exists and has the right format
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Missing or invalid Authorization header",
-			})
-		}
+        token := strings.TrimPrefix(authHeader, "Bearer ")
+        if token == "" {
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Invalid token",
+            })
+        }
 
-		// Extract token
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid token",
-			})
-		}
+        // In production, validate the token and check staff privileges.
+        // Here we mock a staff ID for demo purposes.
+        staffID, err := uuid.Parse("00000000-0000-0000-0000-000000000002")
+        if err != nil {
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                "error": "Failed to parse staff ID",
+            })
+        }
 
-		// In a real application, you would validate the token and check if the user is staff
-		// For this example, we'll just set a mock staff ID
-		staffID, err := uuid.Parse("00000000-0000-0000-0000-000000000002")
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to parse staff ID",
-			})
-		}
-
-		c.Locals("staffID", staffID)
-		c.Locals("isStaff", true)
-
-		return c.Next()
-	}
+        c.Locals("staffID", staffID)
+        c.Locals("isStaff", true)
+        return c.Next()
+    }
 }
 
-// GetCustomerIDFromContext extracts the customer ID from the context
-func GetCustomerIDFromContext(c *fiber.Ctx) (uuid.UUID, error) {
-	customerID, ok := c.Locals("customerID").(uuid.UUID)
-	if !ok {
-		return uuid.Nil, errors.New("customer ID not found in context")
-	}
-	return customerID, nil
+// GetCustomerIDFromContext retrieves the customer ID (string) from context locals.
+func GetCustomerIDFromContext(c *fiber.Ctx) (string, error) {
+    id, ok := c.Locals("customerID").(string)
+    if !ok || id == "" {
+        return "", errors.New("customer ID not found in context")
+    }
+    return id, nil
 }
